@@ -7,7 +7,6 @@ import json
 import aiohttp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, PreCheckoutQueryHandler
-from telegram.request import HTTPXRequest
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -415,9 +414,7 @@ async def generate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(user_id) != "8406627355":
         update_user_balance(user_id, -1)
     
-    status_msg = await query.message.reply_text(
-        f"{type_name} ({length} знаков)\n🔍 Поиск..."
-    )
+    status_msg = await query.message.reply_text(f"🔍 Поиск...")
     
     try:
         username = await find_available_username_massive(username_type, length, 2500)
@@ -607,8 +604,7 @@ async def cleanup():
 def main():
     logger.info("Запуск бота...")
     
-    request = HTTPXRequest()
-    application = Application.builder().token(BOT_TOKEN).request(request).build()
+    application = Application.builder().token(BOT_TOKEN).build()
     
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("check", check_command))
@@ -619,11 +615,7 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
     
     logger.info("Бот запущен!")
-    
-    try:
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
-    finally:
-        asyncio.run(cleanup())
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     try:
