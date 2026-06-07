@@ -5,6 +5,7 @@ import string
 import os
 import json
 import aiohttp
+from aiohttp import web
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, PreCheckoutQueryHandler
 
@@ -240,6 +241,18 @@ def generate_username(username_type, length):
         return generate_sounding_username(length)
     else:
         return generate_letters_username(length)
+
+async def health_check(request):
+    return web.Response(text="OK")
+
+async def run_web_server():
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 10000)
+    await site.start()
+    logger.info("Web сервер запущен на порту 10000")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -603,6 +616,9 @@ async def cleanup():
 
 def main():
     logger.info("Запуск бота...")
+    
+    loop = asyncio.get_event_loop()
+    loop.create_task(run_web_server())
     
     application = Application.builder().token(BOT_TOKEN).build()
     
