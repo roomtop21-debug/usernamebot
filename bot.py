@@ -31,9 +31,6 @@ session = None
 CONSONANTS = 'bcdfghjklmnpqrstvwxyz'
 VOWELS = 'aeiou'
 
-# Счётчик всех сгенерированных username
-total_generated_global = 0
-
 def load_users():
     try:
         with open(USERS_FILE, 'r') as f:
@@ -57,7 +54,8 @@ def get_user_data(user_id):
                 'referrals': 0,
                 'referral_code': 'ADMIN999',
                 'referred_by': None,
-                'referral_bonus_claimed': False
+                'referral_bonus_claimed': False,
+                'pending_referral': None
             }
         else:
             users[user_id]['balance'] = 999
@@ -71,7 +69,8 @@ def get_user_data(user_id):
             'referrals': 0,
             'referral_code': generate_referral_code(),
             'referred_by': None,
-            'referral_bonus_claimed': False
+            'referral_bonus_claimed': False,
+            'pending_referral': None
         }
         save_users(users)
     
@@ -95,7 +94,6 @@ def update_user_balance(user_id, amount):
     return 0
 
 def get_total_generated():
-    """Считает общее количество сгенерированных username"""
     users = load_users()
     total = 0
     for user_data in users.values():
@@ -105,6 +103,54 @@ def get_total_generated():
 def generate_referral_code():
     chars = string.ascii_letters + string.digits
     return ''.join(random.choice(chars) for _ in range(8))
+
+def save_pending_referral(user_id, ref_code):
+    """Сохраняет реферальный код до подтверждения подписки"""
+    users = load_users()
+    user_id = str(user_id)
+    
+    if user_id in users:
+        # Ищем кто владелец кода
+        for uid, data in users.items():
+            if data.get('referral_code') == ref_code and uid != user_id:
+                if users[user_id].get('referred_by') is None:
+                    users[user_id]['pending_referral'] = uid
+                    save_users(users)
+                    logger.info(f"Сохранён pending_referral: user={user_id}, referrer={uid}")
+                    return uid
+    
+    return None
+
+def claim_referral_bonus(user_id):
+    """Начисляет бонус после подтверждения подписки"""
+    users = load_users()
+    user_id = str(user_id)
+    
+    if user_id not in users:
+        return False
+    
+    user_data = users[user_id]
+    pending = user_data.get('pending_referral')
+    
+    logger.info(f"claim_referral_bonus: user={user_id}, pending={pending}, claimed={user_data.get('referral_bonus_claimed')}")
+    
+    if pending and not user_data.get('referral_bonus_claimed') and user_id != "8406627355":
+        # Начисляем бонус новому пользователю
+        users[user_id]['referred_by'] = pending
+        users[user_id]['balance'] = users[user_id].get('balance', 0) + 2
+        users[user_id]['referral_bonus_claimed'] = True
+        users[user_id]['pending_referral'] = None
+        
+        # Начисляем бонус рефереру
+        if pending in users:
+            users[pending]['balance'] = users[pending].get('balance', 0) + 2
+            users[pending]['referrals'] = users[pending].get('referrals', 0) + 1
+        
+        save_users(users)
+        logger.info(f"Бонус начислен: user={user_id}, referrer={pending}")
+        return pending
+    
+    return None
 
 async def check_subscription(user_id, context):
     if str(user_id) == "8406627355":
@@ -267,7 +313,15 @@ async def run_web_server():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    logger.info(f"START: user={user_id}, args={context.args}")
     
+    # Сохраняем реферальный код (если есть) для начисления после подписки
+    if context.args and len(context.args) > 0:
+        ref_code = context.args[0]
+        logger.info(f"Получен реферальный код: {ref_code}")
+        save_pending_referral(user_id, ref_code)
+    
+    # Проверяем подписку
     is_subscribed = await check_subscription(user_id, context)
     
     if not is_subscribed:
@@ -284,46 +338,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    user_data = get_user_data(user_id)
-    
-    # Проверяем реферальный код
-    if context.args and len(context.args) > 0:
-        ref_code = context.args[0]
-        users = load_users()
-        referrer_found = False
-        
-        for uid, data in users.items():
-            if data.get('referral_code') == ref_code and uid != str(user_id):
-                referrer_found = True
-                # Проверяем что пользователь ещё не использовал реферальный код
-                if user_data.get('referred_by') is None:
-                    if str(user_id) != "8406627355":
-                        users[str(user_id)]['referred_by'] = uid
-                        users[str(user_id)]['balance'] += 2
-                        users[str(user_id)]['referral_bonus_claimed'] = True
-                        users[uid]['balance'] += 2
-                        users[uid]['referrals'] += 1
-                        save_users(users)
-                        
-                        # Уведомляем пригласившего
-                        try:
-                            await context.bot.send_message(
-                                chat_id=int(uid),
-                                text="🎉 По вашей реферальной ссылке присоединился новый пользователь!\n"
-                                     "💰 Вам начислено +2 генерации на баланс!"
-                            )
-                        except Exception as e:
-                            logger.error(f"Не удалось отправить уведомление рефереру {uid}: {e}")
-                        
-                        await update.message.reply_text(
-                            "🎉 Вы присоединились по реферальной ссылке!\n"
-                            "💰 Вам начислено +2 генерации на баланс!"
-                        )
-                break
-        
-        if not referrer_found:
-            logger.warning(f"Реферальный код {ref_code} не найден в базе")
-    
+    # Показываем главное меню
     user_data = get_user_data(user_id)
     total_generated = get_total_generated()
     
@@ -352,17 +367,30 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     is_subscribed = await check_subscription(user_id, context)
     
     if is_subscribed:
-        # Проверяем реферальные бонусы после подписки
-        user_data = get_user_data(user_id)
-        if user_data.get('referred_by') and not user_data.get('referral_bonus_claimed'):
-            users = load_users()
-            ref_id = user_data['referred_by']
-            if str(user_id) != "8406627355":
-                users[str(user_id)]['balance'] += 2
-                users[str(user_id)]['referral_bonus_claimed'] = True
-                users[ref_id]['balance'] += 2
-                users[ref_id]['referrals'] += 1
-                save_users(users)
+        # Начисляем реферальный бонус только после подтверждения подписки
+        ref_result = claim_referral_bonus(user_id)
+        
+        if ref_result:
+            # Уведомляем реферера
+            try:
+                await context.bot.send_message(
+                    chat_id=int(ref_result),
+                    text="🎉 По вашей реферальной ссылке присоединился новый пользователь!\n"
+                         "💰 Вам начислено +2 генерации на баланс!"
+                )
+                logger.info(f"Уведомление отправлено рефереру {ref_result}")
+            except Exception as e:
+                logger.error(f"Ошибка отправки уведомления: {e}")
+            
+            # Уведомляем нового пользователя
+            try:
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text="🎉 Вы присоединились по реферальной ссылке!\n"
+                         "💰 Вам начислено +2 генерации на баланс!"
+                )
+            except:
+                pass
         
         await query.message.delete()
         await show_main_menu(query.message, user_id)
@@ -473,7 +501,6 @@ async def generate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             save_users(users)
             
             user_data = get_user_data(user_id)
-            total_generated = get_total_generated()
             
             keyboard = [[InlineKeyboardButton(
                 text=f"🚀 Занять @{username}",
@@ -603,7 +630,7 @@ async def referral_system(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "👥 Реферальная система\n\n"
         "🎁 +2 генерации вам и другу\n"
-        "⚠️ После подписки на @generateuse\n\n"
+        "⚠️ Бонус начисляется после подписки на @generateuse\n\n"
         f"📊 Друзей: {user_data['referrals']}\n"
         f"🔗 Ваша ссылка:\n{referral_link}"
     )
