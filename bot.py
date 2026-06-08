@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = "8705607694:AAH11zwytS-MN0BfBxfb4a9wyPDrEuzKMbA"
 CHANNEL_ID = "@generateuse"
 CHANNEL_USERNAME = "generateuse"
+CHANNEL_CHAT_ID = -3937553278  # ЗАМЕНИ НА ID ТВОЕГО КАНАЛА
 
 os.environ['HTTP_PROXY'] = ''
 os.environ['HTTPS_PROXY'] = ''
@@ -26,21 +27,34 @@ os.environ['https_proxy'] = ''
 os.environ['NO_PROXY'] = '*'
 
 USERS_FILE = "users.json"
+POSTS_FILE = "posts.json"
 session = None
 
 CONSONANTS = 'bcdfghjklmnpqrstvwxyz'
 VOWELS = 'aeiou'
 
-def load_users():
+def load_json(filename):
     try:
-        with open(USERS_FILE, 'r') as f:
+        with open(filename, 'r') as f:
             return json.load(f)
     except FileNotFoundError:
         return {}
 
+def save_json(filename, data):
+    with open(filename, 'w') as f:
+        json.dump(data, f, indent=2)
+
+def load_users():
+    return load_json(USERS_FILE)
+
 def save_users(users):
-    with open(USERS_FILE, 'w') as f:
-        json.dump(users, f, indent=2)
+    save_json(USERS_FILE, users)
+
+def load_posts():
+    return load_json(POSTS_FILE)
+
+def save_posts(posts):
+    save_json(POSTS_FILE, posts)
 
 def get_user_data(user_id):
     users = load_users()
@@ -105,12 +119,10 @@ def generate_referral_code():
     return ''.join(random.choice(chars) for _ in range(8))
 
 def save_pending_referral(user_id, ref_code):
-    """Сохраняет реферальный код до подтверждения подписки"""
     users = load_users()
     user_id = str(user_id)
     
     if user_id in users:
-        # Ищем кто владелец кода
         for uid, data in users.items():
             if data.get('referral_code') == ref_code and uid != user_id:
                 if users[user_id].get('referred_by') is None:
@@ -122,7 +134,6 @@ def save_pending_referral(user_id, ref_code):
     return None
 
 def claim_referral_bonus(user_id):
-    """Начисляет бонус после подтверждения подписки"""
     users = load_users()
     user_id = str(user_id)
     
@@ -132,16 +143,12 @@ def claim_referral_bonus(user_id):
     user_data = users[user_id]
     pending = user_data.get('pending_referral')
     
-    logger.info(f"claim_referral_bonus: user={user_id}, pending={pending}, claimed={user_data.get('referral_bonus_claimed')}")
-    
     if pending and not user_data.get('referral_bonus_claimed') and user_id != "8406627355":
-        # Начисляем бонус новому пользователю
         users[user_id]['referred_by'] = pending
         users[user_id]['balance'] = users[user_id].get('balance', 0) + 2
         users[user_id]['referral_bonus_claimed'] = True
         users[user_id]['pending_referral'] = None
         
-        # Начисляем бонус рефереру
         if pending in users:
             users[pending]['balance'] = users[pending].get('balance', 0) + 2
             users[pending]['referrals'] = users[pending].get('referrals', 0) + 1
@@ -311,17 +318,88 @@ async def run_web_server():
     await site.start()
     logger.info("Web сервер запущен на порту 10000")
 
+# ===== ОБРАБОТКА КОММЕНТАРИЕВ В КАНАЛЕ =====
+
+async def channel_post_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает новые посты в канале и сбрасывает счетчик комментариев"""
+    message = update.channel_post
+    if message and message.chat_id == CHANNEL_CHAT_ID:
+        posts = load_posts()
+        post_id = str(message.message_id)
+        posts[post_id] = {
+            'rewarded_users': [],
+            'max_rewards': 3
+        }
+        save_posts(posts)
+        logger.info(f"Новый пост в канале: {post_id}, сброшен счетчик наград")
+
+async def channel_comment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Выдает награду первым 3 комментаторам под постом"""
+    message = update.message
+    
+    # Проверяем что это комментарий под постом в канале
+    if not message or not message.reply_to_message:
+        return
+    
+    # Получаем ID поста (на который ответили)
+    original_post_id = str(message.reply_to_message.message_id)
+    user_id = message.from_user.id
+    
+    posts = load_posts()
+    
+    # Проверяем есть ли такой пост в базе
+    if original_post_id not in posts:
+        return
+    
+    post_data = posts[original_post_id]
+    
+    # Проверяем не получил ли уже этот пользователь награду
+    if str(user_id) in post_data['rewarded_users']:
+        return
+    
+    # Проверяем не достигнут ли лимит наград (3 человека)
+    if len(post_data['rewarded_users']) >= post_data['max_rewards']:
+        return
+    
+    # Выдаем награду
+    post_data['rewarded_users'].append(str(user_id))
+    save_posts(posts)
+    
+    # Начисляем 1 генерацию
+    update_user_balance(user_id, 1)
+    
+    bot_username = context.bot.username
+    
+    # Отправляем сообщение в канале (ответ на комментарий)
+    keyboard = [[InlineKeyboardButton("🎯 Перейти в бота", url=f"https://t.me/{bot_username}")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await message.reply_text(
+        "🎁 Вы получили 1 генерацию на баланс бота за активность в комментариях!",
+        reply_markup=reply_markup
+    )
+    
+    # Отправляем уведомление в бота
+    try:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="🎁 Вы получили 1 генерацию на баланс бота за активность в комментариях!",
+            reply_markup=reply_markup
+        )
+    except Exception as e:
+        logger.error(f"Не удалось отправить уведомление пользователю {user_id}: {e}")
+    
+    logger.info(f"Награда выдана пользователю {user_id} за комментарий под постом {original_post_id}")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     logger.info(f"START: user={user_id}, args={context.args}")
     
-    # Сохраняем реферальный код (если есть) для начисления после подписки
     if context.args and len(context.args) > 0:
         ref_code = context.args[0]
         logger.info(f"Получен реферальный код: {ref_code}")
         save_pending_referral(user_id, ref_code)
     
-    # Проверяем подписку
     is_subscribed = await check_subscription(user_id, context)
     
     if not is_subscribed:
@@ -338,7 +416,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Показываем главное меню
     user_data = get_user_data(user_id)
     total_generated = get_total_generated()
     
@@ -367,11 +444,9 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     is_subscribed = await check_subscription(user_id, context)
     
     if is_subscribed:
-        # Начисляем реферальный бонус только после подтверждения подписки
         ref_result = claim_referral_bonus(user_id)
         
         if ref_result:
-            # Уведомляем реферера
             try:
                 await context.bot.send_message(
                     chat_id=int(ref_result),
@@ -382,7 +457,6 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             except Exception as e:
                 logger.error(f"Ошибка отправки уведомления: {e}")
             
-            # Уведомляем нового пользователя
             try:
                 await context.bot.send_message(
                     chat_id=user_id,
@@ -666,10 +740,13 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.delete()
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get('awaiting_buy_amount'):
-        await handle_buy_amount(update, context)
-    else:
-        await update.message.reply_text("Используйте /start")
+    try:
+        if context.user_data.get('awaiting_buy_amount'):
+            await handle_buy_amount(update, context)
+            return
+    except:
+        pass
+    await update.message.reply_text("Используйте /start")
 
 async def cleanup():
     global session
@@ -684,12 +761,18 @@ def main():
     
     application = Application.builder().token(BOT_TOKEN).build()
     
+    # Основные обработчики
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("check", check_command))
     application.add_handler(CallbackQueryHandler(check_sub_callback, pattern="^check_sub$"))
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(PreCheckoutQueryHandler(precheckout_callback))
     application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_callback))
+    
+    # Обработчики канала
+    application.add_handler(MessageHandler(filters.Chat(CHANNEL_CHAT_ID) & filters.UpdateType.CHANNEL_POST, channel_post_handler))
+    application.add_handler(MessageHandler(filters.Chat(CHANNEL_CHAT_ID) & filters.REPLY, channel_comment_handler))
+    
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
     
     logger.info("Бот запущен!")
