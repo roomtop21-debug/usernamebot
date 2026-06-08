@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = "8705607694:AAH11zwytS-MN0BfBxfb4a9wyPDrEuzKMbA"
 CHANNEL_ID = "@generateuse"
 CHANNEL_USERNAME = "generateuse"
-CHANNEL_CHAT_ID = -1003937553278
+CHANNEL_CHAT_ID = -3983302844
 
 os.environ['HTTP_PROXY'] = ''
 os.environ['HTTPS_PROXY'] = ''
