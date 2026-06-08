@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = "8705607694:AAH11zwytS-MN0BfBxfb4a9wyPDrEuzKMbA"
 CHANNEL_ID = "@generateuse"
 CHANNEL_USERNAME = "generateuse"
-CHANNEL_CHAT_ID = -3937553278  # ЗАМЕНИ НА ID ТВОЕГО КАНАЛА
+CHANNEL_CHAT_ID = -1003937553278
 
 os.environ['HTTP_PROXY'] = ''
 os.environ['HTTPS_PROXY'] = ''
@@ -318,46 +318,53 @@ async def run_web_server():
     await site.start()
     logger.info("Web сервер запущен на порту 10000")
 
-# ===== ОБРАБОТКА КОММЕНТАРИЕВ В КАНАЛЕ =====
+# ===== ОБРАБОТКА КАНАЛА =====
 
 async def channel_post_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает новые посты в канале и сбрасывает счетчик комментариев"""
+    """Новый пост в канале - сбрасывает счетчик наград"""
     message = update.channel_post
-    if message and message.chat_id == CHANNEL_CHAT_ID:
-        posts = load_posts()
-        post_id = str(message.message_id)
-        posts[post_id] = {
-            'rewarded_users': [],
-            'max_rewards': 3
-        }
-        save_posts(posts)
-        logger.info(f"Новый пост в канале: {post_id}, сброшен счетчик наград")
+    if not message:
+        return
+    
+    posts = load_posts()
+    post_id = str(message.message_id)
+    posts[post_id] = {
+        'rewarded_users': [],
+        'max_rewards': 3
+    }
+    save_posts(posts)
+    logger.info(f"Новый пост в канале: {post_id}")
 
-async def channel_comment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Выдает награду первым 3 комментаторам под постом"""
+async def comment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Выдает награду за комментарий"""
     message = update.message
     
-    # Проверяем что это комментарий под постом в канале
+    # Только ответы на сообщения
     if not message or not message.reply_to_message:
         return
     
-    # Получаем ID поста (на который ответили)
+    # Только в группе комментариев канала
+    if str(message.chat_id) != str(CHANNEL_CHAT_ID):
+        return
+    
     original_post_id = str(message.reply_to_message.message_id)
     user_id = message.from_user.id
     
+    # Игнорируем ботов и анонимов
+    if message.from_user.is_bot:
+        return
+    
     posts = load_posts()
     
-    # Проверяем есть ли такой пост в базе
     if original_post_id not in posts:
+        logger.info(f"Пост {original_post_id} не найден в базе")
         return
     
     post_data = posts[original_post_id]
     
-    # Проверяем не получил ли уже этот пользователь награду
     if str(user_id) in post_data['rewarded_users']:
         return
     
-    # Проверяем не достигнут ли лимит наград (3 человека)
     if len(post_data['rewarded_users']) >= post_data['max_rewards']:
         return
     
@@ -365,39 +372,39 @@ async def channel_comment_handler(update: Update, context: ContextTypes.DEFAULT_
     post_data['rewarded_users'].append(str(user_id))
     save_posts(posts)
     
-    # Начисляем 1 генерацию
     update_user_balance(user_id, 1)
     
     bot_username = context.bot.username
-    
-    # Отправляем сообщение в канале (ответ на комментарий)
     keyboard = [[InlineKeyboardButton("🎯 Перейти в бота", url=f"https://t.me/{bot_username}")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await message.reply_text(
-        "🎁 Вы получили 1 генерацию на баланс бота за активность в комментариях!",
-        reply_markup=reply_markup
-    )
+    award_text = "🎁 Вы получили 1 генерацию на баланс бота за активность в комментариях!"
     
-    # Отправляем уведомление в бота
+    # Ответ в комментариях
+    await message.reply_text(award_text, reply_markup=reply_markup)
+    
+    # Уведомление в бота
     try:
         await context.bot.send_message(
             chat_id=user_id,
-            text="🎁 Вы получили 1 генерацию на баланс бота за активность в комментариях!",
+            text=award_text,
             reply_markup=reply_markup
         )
     except Exception as e:
         logger.error(f"Не удалось отправить уведомление пользователю {user_id}: {e}")
     
-    logger.info(f"Награда выдана пользователю {user_id} за комментарий под постом {original_post_id}")
+    logger.info(f"Награда +1 генерация: user={user_id}, пост={original_post_id}, всего награждено={len(post_data['rewarded_users'])}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Игнорируем в группах
+    if update.effective_chat.type in ['group', 'supergroup', 'channel']:
+        return
+    
     user_id = update.effective_user.id
     logger.info(f"START: user={user_id}, args={context.args}")
     
     if context.args and len(context.args) > 0:
         ref_code = context.args[0]
-        logger.info(f"Получен реферальный код: {ref_code}")
         save_pending_referral(user_id, ref_code)
     
     is_subscribed = await check_subscription(user_id, context)
@@ -453,18 +460,8 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     text="🎉 По вашей реферальной ссылке присоединился новый пользователь!\n"
                          "💰 Вам начислено +2 генерации на баланс!"
                 )
-                logger.info(f"Уведомление отправлено рефереру {ref_result}")
             except Exception as e:
                 logger.error(f"Ошибка отправки уведомления: {e}")
-            
-            try:
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text="🎉 Вы присоединились по реферальной ссылке!\n"
-                         "💰 Вам начислено +2 генерации на баланс!"
-                )
-            except:
-                pass
         
         await query.message.delete()
         await show_main_menu(query.message, user_id)
@@ -563,7 +560,7 @@ async def generate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(user_id) != "8406627355":
         update_user_balance(user_id, -1)
     
-    status_msg = await query.message.reply_text(f"🔍 Поиск...")
+    status_msg = await query.message.reply_text("🔍 Поиск...")
     
     try:
         username = await find_available_username_massive(username_type, length, 2500)
@@ -740,6 +737,10 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.delete()
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Игнорируем группы и каналы
+    if update.effective_chat.type in ['group', 'supergroup', 'channel']:
+        return
+    
     try:
         if context.user_data.get('awaiting_buy_amount'):
             await handle_buy_amount(update, context)
@@ -761,6 +762,10 @@ def main():
     
     application = Application.builder().token(BOT_TOKEN).build()
     
+    # Обработчики канала
+    application.add_handler(MessageHandler(filters.ChatType.CHANNEL, channel_post_handler))
+    application.add_handler(MessageHandler(filters.REPLY & ~filters.COMMAND, comment_handler))
+    
     # Основные обработчики
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("check", check_command))
@@ -768,11 +773,6 @@ def main():
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(PreCheckoutQueryHandler(precheckout_callback))
     application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_callback))
-    
-    # Обработчики канала
-    application.add_handler(MessageHandler(filters.Chat(CHANNEL_CHAT_ID) & filters.UpdateType.CHANNEL_POST, channel_post_handler))
-    application.add_handler(MessageHandler(filters.Chat(CHANNEL_CHAT_ID) & filters.REPLY, channel_comment_handler))
-    
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
     
     logger.info("Бот запущен!")
