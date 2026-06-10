@@ -476,7 +476,7 @@ async def activity_group_handler(update: Update, context: ContextTypes.DEFAULT_T
     user_last_message[user_id] = now
     
     # Шанс 5%
-    if random.random() > 0.05:
+    if random.random() > 0.1:
         return
     
     update_user_balance(user_id, 1)
