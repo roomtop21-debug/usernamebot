@@ -15,10 +15,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8705607694:AAH11zwytS-MN0BfBxfb4a9wyPDrEuzKMbA")
 CHANNEL_ID = "@generateuse"
 CHANNEL_USERNAME = "generateuse"
-CHANNEL_CHAT_ID = -3983302844
+CHANNEL_CHAT_ID = -1003983302844
 
 os.environ['HTTP_PROXY'] = ''
 os.environ['HTTPS_PROXY'] = ''
@@ -318,10 +318,7 @@ async def run_web_server():
     await site.start()
     logger.info("Web сервер запущен на порту 10000")
 
-# ===== ОБРАБОТКА КАНАЛА =====
-
 async def channel_post_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Новый пост в канале - сбрасывает счетчик наград"""
     message = update.channel_post
     if not message:
         return
@@ -336,28 +333,60 @@ async def channel_post_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     logger.info(f"Новый пост в канале: {post_id}")
 
 async def comment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Выдает награду за комментарий"""
     message = update.message
     
-    # Только ответы на сообщения
     if not message or not message.reply_to_message:
         return
     
-    # Только в группе комментариев канала
     if str(message.chat_id) != str(CHANNEL_CHAT_ID):
         return
     
+    # Команда /add от админа
+    if message.text and message.text.startswith('/add'):
+        if message.from_user.id == 8406627355:
+            try:
+                parts = message.text.split()
+                amount = int(parts[1]) if len(parts) > 1 else 1
+            except:
+                amount = 1
+            
+            target_user = message.reply_to_message.from_user
+            
+            if target_user and not target_user.is_bot:
+                update_user_balance(target_user.id, amount)
+                
+                bot_username = context.bot.username
+                keyboard = [[InlineKeyboardButton("🎯 Перейти в бота", url=f"https://t.me/{bot_username}")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                award_text = f"🎁 Вы получили {amount} генерацию(й) на баланс бота за активность в комментариях!"
+                
+                await message.reply_text(f"✅ {amount} генерация выдана @{target_user.username or target_user.id}", reply_markup=reply_markup)
+                
+                try:
+                    await context.bot.send_message(
+                        chat_id=target_user.id,
+                        text=award_text,
+                        reply_markup=reply_markup
+                    )
+                except:
+                    pass
+                
+                logger.info(f"Админ выдал {amount} генераций пользователю {target_user.id}")
+            return
+        else:
+            return
+    
+    # Обычная награда первым 3
     original_post_id = str(message.reply_to_message.message_id)
     user_id = message.from_user.id
     
-    # Игнорируем ботов и анонимов
     if message.from_user.is_bot:
         return
     
     posts = load_posts()
     
     if original_post_id not in posts:
-        logger.info(f"Пост {original_post_id} не найден в базе")
         return
     
     post_data = posts[original_post_id]
@@ -368,7 +397,6 @@ async def comment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(post_data['rewarded_users']) >= post_data['max_rewards']:
         return
     
-    # Выдаем награду
     post_data['rewarded_users'].append(str(user_id))
     save_posts(posts)
     
@@ -380,10 +408,8 @@ async def comment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     award_text = "🎁 Вы получили 1 генерацию на баланс бота за активность в комментариях!"
     
-    # Ответ в комментариях
     await message.reply_text(award_text, reply_markup=reply_markup)
     
-    # Уведомление в бота
     try:
         await context.bot.send_message(
             chat_id=user_id,
@@ -391,12 +417,11 @@ async def comment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup
         )
     except Exception as e:
-        logger.error(f"Не удалось отправить уведомление пользователю {user_id}: {e}")
+        logger.error(f"Не удалось отправить уведомление: {e}")
     
-    logger.info(f"Награда +1 генерация: user={user_id}, пост={original_post_id}, всего награждено={len(post_data['rewarded_users'])}")
+    logger.info(f"Награда +1: user={user_id}, пост={original_post_id}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Игнорируем в группах
     if update.effective_chat.type in ['group', 'supergroup', 'channel']:
         return
     
@@ -737,7 +762,6 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.delete()
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Игнорируем группы и каналы
     if update.effective_chat.type in ['group', 'supergroup', 'channel']:
         return
     
@@ -757,16 +781,15 @@ async def cleanup():
 def main():
     logger.info("Запуск бота...")
     
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     loop.create_task(run_web_server())
     
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # Обработчики канала
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL, channel_post_handler))
     application.add_handler(MessageHandler(filters.REPLY & ~filters.COMMAND, comment_handler))
     
-    # Основные обработчики
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("check", check_command))
     application.add_handler(CallbackQueryHandler(check_sub_callback, pattern="^check_sub$"))
