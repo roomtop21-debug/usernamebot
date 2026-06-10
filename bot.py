@@ -128,9 +128,7 @@ def save_pending_referral(user_id, ref_code):
                 if users[user_id].get('referred_by') is None:
                     users[user_id]['pending_referral'] = uid
                     save_users(users)
-                    logger.info(f"Сохранён pending_referral: user={user_id}, referrer={uid}")
                     return uid
-    
     return None
 
 def claim_referral_bonus(user_id):
@@ -154,7 +152,6 @@ def claim_referral_bonus(user_id):
             users[pending]['referrals'] = users[pending].get('referrals', 0) + 1
         
         save_users(users)
-        logger.info(f"Бонус начислен: user={user_id}, referrer={pending}")
         return pending
     
     return None
@@ -332,7 +329,76 @@ async def channel_post_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     save_posts(posts)
     logger.info(f"Новый пост в канале: {post_id}")
 
+async def add_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик /add - работает в любом чате где есть бот"""
+    message = update.message
+    
+    if not message or not message.text or not message.text.startswith('/add'):
+        return
+    
+    # Только админ
+    if message.from_user.id != 8406627355:
+        return
+    
+    # Должен быть ответ на чье-то сообщение
+    if not message.reply_to_message:
+        await message.reply_text("❌ Нужно ответить на сообщение пользователя")
+        return
+    
+    try:
+        parts = message.text.split()
+        amount = int(parts[1]) if len(parts) > 1 else 1
+    except:
+        amount = 1
+    
+    target_user = message.reply_to_message.from_user
+    
+    if not target_user or target_user.is_bot:
+        await message.reply_text("❌ Нельзя выдать боту")
+        return
+    
+    # Начисляем генерации
+    update_user_balance(target_user.id, amount)
+    user_data = get_user_data(target_user.id)
+    
+    bot_username = context.bot.username
+    keyboard = [[InlineKeyboardButton("🎯 Перейти в бота", url=f"https://t.me/{bot_username}")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    award_text = f"🎁 Вы получили {amount} генерацию(й) на баланс бота за активность в комментариях!"
+    
+    # Ответ в чате
+    await message.reply_text(
+        f"✅ @{target_user.username or target_user.id} получил {amount} генераций\n"
+        f"💰 Его баланс: {user_data['balance']} юзернеймов",
+        reply_markup=reply_markup
+    )
+    
+    # Уведомление пользователю в ЛС
+    try:
+        await context.bot.send_message(
+            chat_id=target_user.id,
+            text=award_text,
+            reply_markup=reply_markup
+        )
+    except:
+        pass
+    
+    # Уведомление админу в ЛС
+    try:
+        await context.bot.send_message(
+            chat_id=8406627355,
+            text=f"✅ Выдано {amount} генераций\n"
+                 f"👤 Пользователь: @{target_user.username or target_user.id}\n"
+                 f"💰 Баланс пользователя: {user_data['balance']} юзернеймов"
+        )
+    except:
+        pass
+    
+    logger.info(f"Админ выдал {amount} генераций пользователю {target_user.id}")
+
 async def comment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Автоматическая награда первым 3 комментаторам"""
     message = update.message
     
     if not message or not message.reply_to_message:
@@ -341,48 +407,11 @@ async def comment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(message.chat_id) != str(CHANNEL_CHAT_ID):
         return
     
-    # Команда /add от админа
-    if message.text and message.text.startswith('/add'):
-        if message.from_user.id == 8406627355:
-            try:
-                parts = message.text.split()
-                amount = int(parts[1]) if len(parts) > 1 else 1
-            except:
-                amount = 1
-            
-            target_user = message.reply_to_message.from_user
-            
-            if target_user and not target_user.is_bot:
-                update_user_balance(target_user.id, amount)
-                
-                bot_username = context.bot.username
-                keyboard = [[InlineKeyboardButton("🎯 Перейти в бота", url=f"https://t.me/{bot_username}")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
-                award_text = f"🎁 Вы получили {amount} генерацию(й) на баланс бота за активность в комментариях!"
-                
-                await message.reply_text(f"✅ {amount} генерация выдана @{target_user.username or target_user.id}", reply_markup=reply_markup)
-                
-                try:
-                    await context.bot.send_message(
-                        chat_id=target_user.id,
-                        text=award_text,
-                        reply_markup=reply_markup
-                    )
-                except:
-                    pass
-                
-                logger.info(f"Админ выдал {amount} генераций пользователю {target_user.id}")
-            return
-        else:
-            return
-    
-    # Обычная награда первым 3
-    original_post_id = str(message.reply_to_message.message_id)
-    user_id = message.from_user.id
-    
     if message.from_user.is_bot:
         return
+    
+    original_post_id = str(message.reply_to_message.message_id)
+    user_id = message.from_user.id
     
     posts = load_posts()
     
@@ -416,17 +445,14 @@ async def comment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=award_text,
             reply_markup=reply_markup
         )
-    except Exception as e:
-        logger.error(f"Не удалось отправить уведомление: {e}")
-    
-    logger.info(f"Награда +1: user={user_id}, пост={original_post_id}")
+    except:
+        pass
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type in ['group', 'supergroup', 'channel']:
         return
     
     user_id = update.effective_user.id
-    logger.info(f"START: user={user_id}, args={context.args}")
     
     if context.args and len(context.args) > 0:
         ref_code = context.args[0]
@@ -485,8 +511,8 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     text="🎉 По вашей реферальной ссылке присоединился новый пользователь!\n"
                          "💰 Вам начислено +2 генерации на баланс!"
                 )
-            except Exception as e:
-                logger.error(f"Ошибка отправки уведомления: {e}")
+            except:
+                pass
         
         await query.message.delete()
         await show_main_menu(query.message, user_id)
@@ -787,9 +813,14 @@ def main():
     
     application = Application.builder().token(BOT_TOKEN).build()
     
+    # Обработчик /add от админа (в любом чате)
+    application.add_handler(MessageHandler(filters.COMMAND & filters.REPLY, add_command_handler))
+    
+    # Канал и комментарии
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL, channel_post_handler))
     application.add_handler(MessageHandler(filters.REPLY & ~filters.COMMAND, comment_handler))
     
+    # Основные обработчики
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("check", check_command))
     application.add_handler(CallbackQueryHandler(check_sub_callback, pattern="^check_sub$"))
