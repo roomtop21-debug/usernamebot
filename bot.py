@@ -19,6 +19,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "8705607694:AAH11zwytS-MN0BfBxfb4a9wyPDr
 CHANNEL_ID = "@generateuse"
 CHANNEL_USERNAME = "generateuse"
 CHANNEL_CHAT_ID = -1003983302844
+ACTIVITY_GROUP_ID = -1002277786445  # ID группы @gujeu
 
 os.environ['HTTP_PROXY'] = ''
 os.environ['HTTPS_PROXY'] = ''
@@ -28,10 +29,14 @@ os.environ['NO_PROXY'] = '*'
 
 USERS_FILE = "users.json"
 POSTS_FILE = "posts.json"
+TOTAL_GEN_FILE = "total_gen.json"
 session = None
 
 CONSONANTS = 'bcdfghjklmnpqrstvwxyz'
 VOWELS = 'aeiou'
+
+# Таймеры для анти-спама в группе активности
+user_last_message = {}
 
 def load_json(filename):
     try:
@@ -55,6 +60,20 @@ def load_posts():
 
 def save_posts(posts):
     save_json(POSTS_FILE, posts)
+
+def get_total_generated():
+    try:
+        with open(TOTAL_GEN_FILE, 'r') as f:
+            data = json.load(f)
+            return data.get('total', 0)
+    except:
+        return 0
+
+def increment_total_generated():
+    total = get_total_generated() + 1
+    with open(TOTAL_GEN_FILE, 'w') as f:
+        json.dump({'total': total}, f)
+    return total
 
 def get_user_data(user_id):
     users = load_users()
@@ -106,13 +125,6 @@ def update_user_balance(user_id, amount):
         save_users(users)
         return users[user_id]['balance']
     return 0
-
-def get_total_generated():
-    users = load_users()
-    total = 0
-    for user_data in users.values():
-        total += user_data.get('total_generated', 0)
-    return total
 
 def generate_referral_code():
     chars = string.ascii_letters + string.digits
@@ -330,17 +342,14 @@ async def channel_post_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     logger.info(f"Новый пост в канале: {post_id}")
 
 async def add_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик /add - работает в любом чате где есть бот"""
     message = update.message
     
     if not message or not message.text or not message.text.startswith('/add'):
         return
     
-    # Только админ
     if message.from_user.id != 8406627355:
         return
     
-    # Должен быть ответ на чье-то сообщение
     if not message.reply_to_message:
         await message.reply_text("❌ Нужно ответить на сообщение пользователя")
         return
@@ -357,7 +366,6 @@ async def add_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await message.reply_text("❌ Нельзя выдать боту")
         return
     
-    # Начисляем генерации
     update_user_balance(target_user.id, amount)
     user_data = get_user_data(target_user.id)
     
@@ -365,16 +373,14 @@ async def add_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard = [[InlineKeyboardButton("🎯 Перейти в бота", url=f"https://t.me/{bot_username}")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    award_text = f"🎁 Вы получили {amount} генерацию(й) на баланс бота за активность в комментариях!"
+    award_text = f"🎁 Вы получили {amount} генерацию(й) на баланс бота!"
     
-    # Ответ в чате
     await message.reply_text(
         f"✅ @{target_user.username or target_user.id} получил {amount} генераций\n"
-        f"💰 Его баланс: {user_data['balance']} юзернеймов",
+        f"💰 Баланс: {user_data['balance']} юзернеймов",
         reply_markup=reply_markup
     )
     
-    # Уведомление пользователю в ЛС
     try:
         await context.bot.send_message(
             chat_id=target_user.id,
@@ -384,13 +390,12 @@ async def add_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     except:
         pass
     
-    # Уведомление админу в ЛС
     try:
         await context.bot.send_message(
             chat_id=8406627355,
             text=f"✅ Выдано {amount} генераций\n"
-                 f"👤 Пользователь: @{target_user.username or target_user.id}\n"
-                 f"💰 Баланс пользователя: {user_data['balance']} юзернеймов"
+                 f"👤 @{target_user.username or target_user.id}\n"
+                 f"💰 Баланс: {user_data['balance']} юзернеймов"
         )
     except:
         pass
@@ -398,7 +403,6 @@ async def add_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     logger.info(f"Админ выдал {amount} генераций пользователю {target_user.id}")
 
 async def comment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Автоматическая награда первым 3 комментаторам"""
     message = update.message
     
     if not message or not message.reply_to_message:
@@ -448,6 +452,58 @@ async def comment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         pass
 
+async def activity_group_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Выдает генерации за активность в группе @gujeu с шансом 5%"""
+    message = update.message
+    
+    if not message or not message.text:
+        return
+    
+    if str(message.chat_id) != str(ACTIVITY_GROUP_ID):
+        return
+    
+    user_id = message.from_user.id
+    
+    if message.from_user.is_bot:
+        return
+    
+    # Анти-спам: не чаще раза в 30 секунд
+    now = asyncio.get_event_loop().time()
+    if user_id in user_last_message:
+        if now - user_last_message[user_id] < 30:
+            return
+    
+    user_last_message[user_id] = now
+    
+    # Шанс 5%
+    if random.random() > 0.05:
+        return
+    
+    update_user_balance(user_id, 1)
+    user_data = get_user_data(user_id)
+    
+    bot_username = context.bot.username
+    keyboard = [[InlineKeyboardButton("🎯 Перейти в бота", url=f"https://t.me/{bot_username}")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    award_text = "🎁 Вы получили 1 генерацию на баланс бота за активность в группе! Общайся дальше что бы получить еще!"
+    
+    await message.reply_text(award_text, reply_markup=reply_markup)
+    
+    # Уведомление админу
+    try:
+        await context.bot.send_message(
+            chat_id=8406627355,
+            text=f"🎁 Активность в группе\n"
+                 f"👤 @{message.from_user.username or user_id}\n"
+                 f"💰 Баланс: {user_data['balance']} юзернеймов\n"
+                 f"💬 Сообщение: {message.text[:50]}"
+        )
+    except:
+        pass
+    
+    logger.info(f"Награда за активность: user={user_id}")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type in ['group', 'supergroup', 'channel']:
         return
@@ -486,7 +542,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     welcome_text = (
         "🎯 Генератор username\n\n"
-        f"🤖 Бот сгенерировал — {total_generated} username\n\n"
+        f"🤖 Всего сгенерировано — {total_generated} username\n\n"
         "Этот бот поможет тебе сделать ценный username, для продажи или для профиля.\n"
         "Мы генерируем уникальные username — 5 значные, такого нет ни-у-кого.\n\n"
         f"💰 Баланс: {user_data['balance']} юзернеймов"
@@ -532,7 +588,7 @@ async def show_main_menu(message, user_id):
     
     text = (
         "🎯 Генератор username\n\n"
-        f"🤖 Бот сгенерировал — {total_generated} username\n\n"
+        f"🤖 Всего сгенерировано — {total_generated} username\n\n"
         "Этот бот поможет тебе сделать ценный username, для продажи или для профиля.\n"
         "Мы генерируем уникальные username — 5 значные, такого нет ни-у-кого.\n\n"
         f"💰 Баланс: {user_data['balance']} юзернеймов"
@@ -618,6 +674,8 @@ async def generate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.delete()
         
         if username:
+            increment_total_generated()
+            
             users = load_users()
             users[str(user_id)]['total_generated'] += 1
             save_users(users)
@@ -813,14 +871,17 @@ def main():
     
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # Обработчик /add от админа (в любом чате)
+    # /add от админа в любом чате
     application.add_handler(MessageHandler(filters.COMMAND & filters.REPLY, add_command_handler))
     
     # Канал и комментарии
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL, channel_post_handler))
-    application.add_handler(MessageHandler(filters.REPLY & ~filters.COMMAND, comment_handler))
+    application.add_handler(MessageHandler(filters.Chat(CHANNEL_CHAT_ID) & filters.REPLY & ~filters.COMMAND, comment_handler))
     
-    # Основные обработчики
+    # Активность в группе @gujeu
+    application.add_handler(MessageHandler(filters.Chat(ACTIVITY_GROUP_ID) & filters.TEXT & ~filters.COMMAND, activity_group_handler))
+    
+    # Основные
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("check", check_command))
     application.add_handler(CallbackQueryHandler(check_sub_callback, pattern="^check_sub$"))
