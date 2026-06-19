@@ -15,7 +15,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8705607694:AAH11zwytS-MN0BfBxfb4a9wyPDrEuzKMbA")
 CHANNEL_ID = "@generateuse"
 CHANNEL_USERNAME = "generateuse"
 CHANNEL_CHAT_ID = -1003983302844
@@ -39,14 +39,23 @@ VOWELS = 'aeiou'
 user_last_message = {}
 admin_edit_state = {}
 
-# Тексты по умолчанию
 DEFAULT_TEXTS = {
     "welcome": (
         "🎯 Генератор username\n\n"
         "🤖 Всего сгенерировано — {total_generated} username\n\n"
         "Этот бот поможет тебе сделать ценный username, для продажи или для профиля.\n"
         "Мы генерируем уникальные username — 5 значные, такого нет ни-у-кого.\n\n"
-        "💰 Баланс: {balance} юзернеймов"
+        "💰 Баланс: {balance} юзернеймов\n"
+        "💎 Premium: {premium}"
+    ),
+    "welcome_premium": (
+        "🎯 Генератор username\n\n"
+        "🤖 Всего сгенерировано — {total_generated} username\n\n"
+        "Этот бот поможет тебе сделать ценный username, для продажи или для профиля.\n"
+        "Мы генерируем уникальные username — 5 значные, такого нет ни-у-кого.\n\n"
+        "💰 Баланс: {balance} юзернеймов\n"
+        "💎 Premium: ✅ Активен\n"
+        "⚡ Ускоренная генерация | 🎯 Команда /custom"
     ),
     "subscription_warning": (
         "⚠️ Для использования бота необходимо подписаться на канал @generateuse\n\n"
@@ -56,6 +65,8 @@ DEFAULT_TEXTS = {
     "no_generations": "❌ Недостаточно генераций!",
     "choose_length": "📏 Выберите длину username:\n💰 Баланс: {balance} генераций",
     "choose_type": "🎯 Выберите тип username ({length} знаков):",
+    "searching": "🔍 Поиск...",
+    "searching_premium": "⚡ Ускоренный поиск (Premium)...",
     "found_username": (
         "✅ Найден username!\n\n"
         "Username: @{username}\n"
@@ -82,6 +93,53 @@ DEFAULT_TEXTS = {
     ),
     "ref_joined": "🎉 Вы присоединились по реферальной ссылке!\n💰 Вам начислено +2 генерации на баланс!",
     "ref_bonus": "🎉 По вашей реферальной ссылке присоединился новый пользователь!\n💰 Вам начислено +2 генерации на баланс!",
+    "premium_info": (
+        "💎 Premium подписка\n\n"
+        "⚡ Ускоренная генерация (5000+ проверок)\n"
+        "🎯 Доступ к /custom (генерация по шаблону)\n\n"
+        "Стоимость: 5 ⭐ XTR (навсегда)\n\n"
+        "Купить Premium?"
+    ),
+    "premium_bought": (
+        "✅ Premium активирован!\n\n"
+        "⚡ Ускоренная генерация\n"
+        "🎯 Команда /custom доступна\n\n"
+        "Пример: /custom nik"
+    ),
+    "premium_already": "💎 У вас уже есть Premium!",
+    "custom_usage": (
+        "🎯 Генерация по шаблону\n\n"
+        "Использование: /custom ваш_шаблон\n"
+        "Используйте * вместо неизвестных букв\n\n"
+        "Примеры:\n"
+        "/custom nik** - найдет username начинающиеся на nik\n"
+        "/custom **game* - найдет username с game в середине\n"
+        "/custom cool - проверит свободен ли cool"
+    ),
+    "custom_searching": "🔍 Ищу username по шаблону '{pattern}'...",
+    "custom_not_found": "😔 Не найдено свободных username по шаблону '{pattern}'.\nГенерация возвращена.",
+    "custom_found": (
+        "✅ Найден username по шаблону!\n\n"
+        "Username: @{username}\n"
+        "Шаблон: {pattern}\n"
+        "💰 Баланс: {balance} юзернеймов"
+    ),
+    "no_premium": (
+        "❌ Эта команда только для Premium пользователей!\n\n"
+        "💎 Купите Premium за 5 ⭐ XTR в главном меню."
+    ),
+    "payment_success": "✅ Оплата успешна!\n💰 +{amount} генераций\n🎯 Баланс: {balance} юзернеймов",
+    "use_start": "Используйте /start",
+    "search_error": "❌ Ошибка. Генерация возвращена.",
+    "buy_input_error": "❌ Введите целое число!",
+    "buy_range_error": "❌ Введите число от 1 до 100",
+    "check_usage": "❌ /check username",
+    "check_searching": "🔍 Проверяю @{username}...",
+    "check_free": "✅ @{username} свободен!",
+    "check_taken": "❌ @{username} занят",
+    "check_error": "❌ Ошибка проверки",
+    "add_need_reply": "❌ Нужно ответить на сообщение пользователя",
+    "add_no_bot": "❌ Нельзя выдать боту",
 }
 
 def load_json(filename):
@@ -135,7 +193,10 @@ def get_text(key, **kwargs):
     texts = load_texts()
     text = texts.get(key, DEFAULT_TEXTS.get(key, ""))
     if kwargs:
-        text = text.format(**kwargs)
+        try:
+            text = text.format(**kwargs)
+        except:
+            pass
     return text
 
 def get_user_data(user_id):
@@ -151,10 +212,12 @@ def get_user_data(user_id):
                 'referral_code': 'ADMIN999',
                 'referred_by': None,
                 'referral_bonus_claimed': False,
-                'pending_referral': None
+                'pending_referral': None,
+                'premium': True
             }
         else:
             users[user_id]['balance'] = 999
+            users[user_id]['premium'] = True
         save_users(users)
         return users[user_id]
     
@@ -166,7 +229,8 @@ def get_user_data(user_id):
             'referral_code': generate_referral_code(),
             'referred_by': None,
             'referral_bonus_claimed': False,
-            'pending_referral': None
+            'pending_referral': None,
+            'premium': False
         }
         save_users(users)
     
@@ -188,6 +252,22 @@ def update_user_balance(user_id, amount):
         save_users(users)
         return users[user_id]['balance']
     return 0
+
+def set_premium(user_id):
+    users = load_users()
+    user_id = str(user_id)
+    if user_id in users:
+        users[user_id]['premium'] = True
+        save_users(users)
+        return True
+    return False
+
+def is_premium(user_id):
+    users = load_users()
+    user_id = str(user_id)
+    if user_id in users:
+        return users[user_id].get('premium', False)
+    return False
 
 def generate_referral_code():
     chars = string.ascii_letters + string.digits
@@ -339,6 +419,65 @@ async def find_available_username_massive(username_type: str, length: int, total
     
     return None
 
+async def find_custom_username(pattern: str, length: int = 5) -> str:
+    """Поиск username по шаблону"""
+    pattern = pattern.lower().strip()
+    
+    # Если длина шаблона больше 5, подстраиваем длину
+    actual_length = max(length, len(pattern))
+    
+    # Генерируем варианты на основе шаблона
+    usernames = set()
+    chars = string.ascii_lowercase + string.digits
+    max_attempts = 5000
+    
+    while len(usernames) < max_attempts:
+        username = list(pattern)
+        
+        # Заменяем * на случайные символы
+        for i in range(len(username)):
+            if username[i] == '*':
+                username[i] = random.choice(chars)
+        
+        username = ''.join(username)
+        
+        # Если длина меньше нужной, добавляем случайные символы
+        while len(username) < actual_length:
+            username += random.choice(chars)
+        
+        # Обрезаем если длиннее
+        username = username[:actual_length]
+        
+        # Проверяем что есть минимум 2 буквы
+        letter_count = sum(1 for c in username if c.isalpha())
+        if letter_count >= 2:
+            usernames.add(username)
+    
+    usernames_list = list(usernames)
+    batch_size = 500
+    all_free_telegram = set()
+    all_sold_fragment = set()
+    
+    for i in range(0, len(usernames_list), batch_size):
+        batch = usernames_list[i:i+batch_size]
+        telegram_task = check_telegram_batch_fast(batch)
+        fragment_task = check_fragment_batch_fast(batch)
+        telegram_free, fragment_sold = await asyncio.gather(telegram_task, fragment_task)
+        all_free_telegram.update(telegram_free)
+        all_sold_fragment.update(fragment_sold)
+        
+        if len(all_free_telegram) > 50:
+            break
+    
+    truly_free = all_free_telegram - all_sold_fragment
+    
+    if truly_free:
+        for username in usernames_list:
+            if username in truly_free:
+                return username
+    
+    return None
+
 def generate_letters_username(length):
     letters = string.ascii_lowercase
     return ''.join(random.choice(letters) for _ in range(length))
@@ -390,10 +529,9 @@ async def run_web_server():
     await site.start()
     logger.info("Web сервер запущен на порту 10000")
 
-# ===== АДМИН-ПАНЕЛЬ РЕДАКТИРОВАНИЯ ТЕКСТОВ =====
+# ===== АДМИН-ПАНЕЛЬ =====
 
 async def adminfrag_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /adminfrag123 - вход в админ-панель редактирования текстов"""
     message = update.message
     
     if message.from_user.id != 8406627355:
@@ -423,7 +561,6 @@ async def adminfrag_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def admin_text_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка кнопок админ-панели"""
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
@@ -470,7 +607,6 @@ async def admin_text_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
 async def admin_receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Получает новый текст от админа"""
     message = update.message
     user_id = message.from_user.id
     
@@ -486,25 +622,29 @@ async def admin_receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     
     key = admin_edit_state[user_id]
-    new_text = message.text or message.caption or ""
     
-    # Сохраняем entities для Premium стикеров
-    if message.entities:
-        # Сохраняем как HTML с emoji
+    if message.text_html:
         texts = load_texts()
-        texts[key] = message.text_html or new_text
+        texts[key] = message.text_html
         save_texts(texts)
-    else:
+    elif message.text:
         texts = load_texts()
-        texts[key] = new_text
+        texts[key] = message.text
+        save_texts(texts)
+    elif message.caption:
+        texts = load_texts()
+        texts[key] = message.caption
         save_texts(texts)
     
     del admin_edit_state[user_id]
     
+    new_text = get_text(key)
     await message.reply_text(
         f"✅ Текст '{key}' обновлен!\n\n"
         f"Новый текст:\n{new_text}"
     )
+
+# ===== ОСНОВНЫЕ ОБРАБОТЧИКИ =====
 
 async def channel_post_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.channel_post
@@ -513,10 +653,7 @@ async def channel_post_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     
     posts = load_posts()
     post_id = str(message.message_id)
-    posts[post_id] = {
-        'rewarded_users': [],
-        'max_rewards': 3
-    }
+    posts[post_id] = {'rewarded_users': [], 'max_rewards': 3}
     save_posts(posts)
 
 async def add_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -529,7 +666,7 @@ async def add_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     
     if not message.reply_to_message:
-        await message.reply_text("❌ Нужно ответить на сообщение пользователя")
+        await message.reply_text(get_text("add_need_reply"))
         return
     
     try:
@@ -541,7 +678,7 @@ async def add_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     target_user = message.reply_to_message.from_user
     
     if not target_user or target_user.is_bot:
-        await message.reply_text("❌ Нельзя выдать боту")
+        await message.reply_text(get_text("add_no_bot"))
         return
     
     update_user_balance(target_user.id, amount)
@@ -551,8 +688,6 @@ async def add_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard = [[InlineKeyboardButton("🎯 Перейти в бота", url=f"https://t.me/{bot_username}")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    award_text = get_text("award_admin", amount=amount)
-    
     await message.reply_text(
         f"✅ @{target_user.username or target_user.id} получил {amount} генераций\n"
         f"💰 Баланс: {user_data['balance']} юзернеймов",
@@ -560,7 +695,11 @@ async def add_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
     
     try:
-        await context.bot.send_message(chat_id=target_user.id, text=award_text, reply_markup=reply_markup)
+        await context.bot.send_message(
+            chat_id=target_user.id,
+            text=get_text("award_admin", amount=amount),
+            reply_markup=reply_markup
+        )
     except:
         pass
     
@@ -657,6 +796,109 @@ async def activity_group_handler(update: Update, context: ContextTypes.DEFAULT_T
     except:
         pass
 
+async def premium_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    
+    if is_premium(user_id):
+        await query.message.reply_text(get_text("premium_already"))
+        return
+    
+    keyboard = [
+        [InlineKeyboardButton("💎 Купить Premium (5 XTR)", callback_data="buy_premium")],
+        [InlineKeyboardButton("🔙 Главное меню", callback_data="main_menu")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.message.reply_text(get_text("premium_info"), reply_markup=reply_markup)
+
+async def buy_premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    
+    if is_premium(user_id):
+        await query.message.reply_text(get_text("premium_already"))
+        return
+    
+    await context.bot.send_invoice(
+        chat_id=user_id,
+        title="Premium подписка",
+        description="Ускоренная генерация + /custom команда",
+        payload=f"premium_{user_id}",
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice("Premium навсегда", 5)]
+    )
+
+async def custom_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message
+    user_id = update.effective_user.id
+    
+    if not is_premium(user_id):
+        await message.reply_text(get_text("no_premium"))
+        return
+    
+    if not context.args:
+        await message.reply_text(get_text("custom_usage"))
+        return
+    
+    pattern = context.args[0].lower()
+    
+    if len(pattern) < 3 or len(pattern) > 15:
+        await message.reply_text("❌ Шаблон должен быть от 3 до 15 символов")
+        return
+    
+    user_data = get_user_data(user_id)
+    
+    if user_data['balance'] <= 0 and str(user_id) != "8406627355":
+        await message.reply_text(get_text("no_generations"))
+        return
+    
+    if str(user_id) != "8406627355":
+        update_user_balance(user_id, -1)
+    
+    status_msg = await message.reply_text(get_text("custom_searching", pattern=pattern))
+    
+    try:
+        username = await find_custom_username(pattern)
+        await status_msg.delete()
+        
+        if username:
+            increment_total_generated()
+            
+            users = load_users()
+            users[str(user_id)]['total_generated'] += 1
+            save_users(users)
+            
+            user_data = get_user_data(user_id)
+            
+            keyboard = [[InlineKeyboardButton(
+                text=f"🚀 Занять @{username}",
+                url=f"https://t.me/{username}"
+            )]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await message.reply_text(
+                get_text("custom_found", username=username, pattern=pattern, balance=user_data['balance']),
+                reply_markup=reply_markup
+            )
+        else:
+            if str(user_id) != "8406627355":
+                update_user_balance(user_id, 1)
+            
+            await message.reply_text(get_text("custom_not_found", pattern=pattern))
+    
+    except Exception as e:
+        logger.error(f"Ошибка custom: {e}")
+        if str(user_id) != "8406627355":
+            update_user_balance(user_id, 1)
+        await message.reply_text(get_text("search_error"))
+        await status_msg.delete()
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type in ['group', 'supergroup', 'channel']:
         return
@@ -681,16 +923,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user_data = get_user_data(user_id)
     total_generated = get_total_generated()
+    premium_status = "✅" if is_premium(user_id) else "❌"
     
     keyboard = [
         [InlineKeyboardButton("🎯 Сгенерировать username", callback_data="choose_length")],
         [InlineKeyboardButton("🛒 Купить генерации", callback_data="buy_generations")],
         [InlineKeyboardButton("👥 Реферальная система", callback_data="referral")],
     ]
+    
+    if not is_premium(user_id):
+        keyboard.append([InlineKeyboardButton("💎 Premium", callback_data="premium_menu")])
+    
+    keyboard.append([InlineKeyboardButton("🛠 Админ-панель", callback_data="admin_panel")])
+    
     reply_markup = InlineKeyboardMarkup(keyboard)
     
+    welcome_key = "welcome_premium" if is_premium(user_id) else "welcome"
     await update.message.reply_text(
-        get_text("welcome", total_generated=total_generated, balance=user_data['balance']),
+        get_text(welcome_key, total_generated=total_generated, balance=user_data['balance'], premium=premium_status),
         reply_markup=reply_markup
     )
 
@@ -718,16 +968,24 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def show_main_menu(message, user_id):
     user_data = get_user_data(user_id)
     total_generated = get_total_generated()
+    premium_status = "✅" if is_premium(user_id) else "❌"
     
     keyboard = [
         [InlineKeyboardButton("🎯 Сгенерировать username", callback_data="choose_length")],
         [InlineKeyboardButton("🛒 Купить генерации", callback_data="buy_generations")],
         [InlineKeyboardButton("👥 Реферальная система", callback_data="referral")],
     ]
+    
+    if not is_premium(user_id):
+        keyboard.append([InlineKeyboardButton("💎 Premium", callback_data="premium_menu")])
+    
+    keyboard.append([InlineKeyboardButton("🛠 Админ-панель", callback_data="admin_panel")])
+    
     reply_markup = InlineKeyboardMarkup(keyboard)
     
+    welcome_key = "welcome_premium" if is_premium(user_id) else "welcome"
     await message.reply_text(
-        get_text("welcome", total_generated=total_generated, balance=user_data['balance']),
+        get_text(welcome_key, total_generated=total_generated, balance=user_data['balance'], premium=premium_status),
         reply_markup=reply_markup
     )
 
@@ -802,10 +1060,14 @@ async def generate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(user_id) != "8406627355":
         update_user_balance(user_id, -1)
     
-    status_msg = await query.message.reply_text("🔍 Поиск...")
+    # Premium - ускоренный поиск
+    total_to_check = 5000 if is_premium(user_id) else 2500
+    search_text = get_text("searching_premium") if is_premium(user_id) else get_text("searching")
+    
+    status_msg = await query.message.reply_text(search_text)
     
     try:
-        username = await find_available_username_massive(username_type, length, 2500)
+        username = await find_available_username_massive(username_type, length, total_to_check)
         await status_msg.delete()
         
         if username:
@@ -843,7 +1105,7 @@ async def generate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка: {e}")
         if str(user_id) != "8406627355":
             update_user_balance(user_id, 1)
-        await query.message.reply_text("❌ Ошибка. Генерация возвращена.")
+        await query.message.reply_text(get_text("search_error"))
         await status_msg.delete()
 
 async def buy_generations_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -860,7 +1122,7 @@ async def handle_buy_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         amount = int(update.message.text)
         if amount < 1 or amount > 100:
-            await update.message.reply_text("❌ Введите число от 1 до 100")
+            await update.message.reply_text(get_text("buy_range_error"))
             return
         
         context.user_data['awaiting_buy_amount'] = False
@@ -869,13 +1131,13 @@ async def handle_buy_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=update.effective_user.id,
             title=f"Покупка {amount} генераций",
             description=f"Генерации username в Telegram",
-            payload=f"buy_{amount}_{update.effective_user.id}",
+            payload=f"gen_{amount}_{update.effective_user.id}",
             provider_token="",
             currency="XTR",
             prices=[LabeledPrice(f"{amount} генераций", amount)]
         )
     except ValueError:
-        await update.message.reply_text("❌ Введите целое число!")
+        await update.message.reply_text(get_text("buy_input_error"))
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -889,6 +1151,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await buy_generations_menu(update, context)
     elif query.data == "referral":
         await referral_system(update, context)
+    elif query.data == "premium_menu":
+        await premium_menu(update, context)
+    elif query.data == "buy_premium":
+        await buy_premium(update, context)
+    elif query.data == "admin_panel":
+        if update.effective_user.id == 8406627355:
+            await adminfrag_command(update, context)
+        else:
+            await query.answer("Нет доступа", show_alert=True)
     elif query.data.startswith("len_"):
         await choose_type(update, context)
     elif query.data.startswith("type_"):
@@ -902,7 +1173,7 @@ async def successful_payment_callback(update: Update, context: ContextTypes.DEFA
     payment = update.message.successful_payment
     payload = payment.invoice_payload
     
-    if payload.startswith("buy_"):
+    if payload.startswith("gen_"):
         parts = payload.split("_")
         amount = int(parts[1])
         user_id = int(parts[2])
@@ -911,8 +1182,14 @@ async def successful_payment_callback(update: Update, context: ContextTypes.DEFA
         user_data = get_user_data(user_id)
         
         await update.message.reply_text(
-            f"✅ Оплата успешна!\n💰 +{amount} генераций\n🎯 Баланс: {user_data['balance']} юзернеймов"
+            get_text("payment_success", amount=amount, balance=user_data['balance'])
         )
+    
+    elif payload.startswith("premium_"):
+        user_id = int(payload.split("_")[1])
+        set_premium(user_id)
+        
+        await update.message.reply_text(get_text("premium_bought"))
 
 async def referral_system(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -935,11 +1212,11 @@ async def referral_system(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("❌ /check username")
+        await update.message.reply_text(get_text("check_usage"))
         return
     
     username = context.args[0].replace("@", "").lower()
-    status_msg = await update.message.reply_text(f"🔍 Проверяю @{username}...")
+    status_msg = await update.message.reply_text(get_text("check_searching", username=username))
     
     try:
         free_set = await check_telegram_batch_fast([username])
@@ -954,11 +1231,11 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if is_free:
             keyboard = [[InlineKeyboardButton("🚀 Занять", url=f"https://t.me/{username}")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(f"✅ @{username} свободен!", reply_markup=reply_markup)
+            await update.message.reply_text(get_text("check_free", username=username), reply_markup=reply_markup)
         else:
-            await update.message.reply_text(f"❌ @{username} занят")
+            await update.message.reply_text(get_text("check_taken", username=username))
     except:
-        await update.message.reply_text("❌ Ошибка проверки")
+        await update.message.reply_text(get_text("check_error"))
         await status_msg.delete()
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -971,7 +1248,7 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
     except:
         pass
-    await update.message.reply_text("Используйте /start")
+    await update.message.reply_text(get_text("use_start"))
 
 async def cleanup():
     global session
@@ -994,6 +1271,9 @@ def main():
     
     # /add от админа
     application.add_handler(MessageHandler(filters.COMMAND & filters.REPLY, add_command_handler))
+    
+    # /custom для Premium
+    application.add_handler(CommandHandler("custom", custom_command))
     
     # Канал и комментарии
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL, channel_post_handler))
