@@ -8,6 +8,7 @@ import aiohttp
 from aiohttp import web
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, PreCheckoutQueryHandler
+from telegram.constants import ParseMode
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -199,6 +200,36 @@ def get_text(key, **kwargs):
         except:
             pass
     return text
+
+async def send_html(chat_id, text, context, reply_markup=None):
+    """Отправляет текст с поддержкой HTML (Premium эмодзи)"""
+    try:
+        return await context.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+    except:
+        return await context.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=reply_markup
+        )
+
+async def reply_html(message, text, reply_markup=None):
+    """Отвечает на сообщение с поддержкой HTML"""
+    try:
+        return await message.reply_text(
+            text=text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+    except:
+        return await message.reply_text(
+            text=text,
+            reply_markup=reply_markup
+        )
 
 def get_user_data(user_id):
     users = load_users()
@@ -682,11 +713,7 @@ async def add_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
     
     try:
-        await context.bot.send_message(
-            chat_id=target_user.id,
-            text=get_text("award_admin", amount=amount),
-            reply_markup=reply_markup
-        )
+        await send_html(target_user.id, get_text("award_admin", amount=amount), context, reply_markup)
     except:
         pass
     
@@ -738,7 +765,7 @@ async def comment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await message.reply_text(get_text("award_comment"), reply_markup=reply_markup)
     
     try:
-        await context.bot.send_message(chat_id=user_id, text=get_text("award_comment"), reply_markup=reply_markup)
+        await send_html(user_id, get_text("award_comment"), context, reply_markup)
     except:
         pass
 
@@ -869,9 +896,10 @@ async def custom_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await message.reply_text(
+            await reply_html(
+                message,
                 get_text("custom_found", username=username, pattern=pattern, balance=user_data['balance']),
-                reply_markup=reply_markup
+                reply_markup
             )
         else:
             if str(user_id) != "8406627355":
@@ -924,9 +952,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     welcome_key = "welcome_premium" if is_premium(user_id) else "welcome"
-    await update.message.reply_text(
+    await send_html(
+        update.effective_chat.id,
         get_text(welcome_key, total_generated=total_generated, balance=user_data['balance'], premium=premium_status),
-        reply_markup=reply_markup
+        context,
+        reply_markup
     )
 
 async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -967,9 +997,11 @@ async def show_main_menu(message, user_id):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     welcome_key = "welcome_premium" if is_premium(user_id) else "welcome"
-    await message.reply_text(
+    await send_html(
+        message.chat.id,
         get_text(welcome_key, total_generated=total_generated, balance=user_data['balance'], premium=premium_status),
-        reply_markup=reply_markup
+        message._bot,
+        reply_markup
     )
 
 async def choose_length(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1067,9 +1099,11 @@ async def generate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await query.message.reply_text(
+            await send_html(
+                query.message.chat.id,
                 get_text("found_username", username=username, length=length, type_name=type_name, balance=user_data['balance']),
-                reply_markup=reply_markup
+                context,
+                reply_markup
             )
         else:
             if str(user_id) != "8406627355":
@@ -1122,7 +1156,6 @@ async def handle_buy_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(get_text("buy_input_error"))
 
 async def main_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик обычных кнопок (не админских)"""
     query = update.callback_query
     await query.answer()
     
@@ -1244,13 +1277,12 @@ def main():
     
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # Админ-панель: callback'и с префиксом adm_
+    # Админ-панель
     application.add_handler(CommandHandler("adminfrag123", adminfrag_command))
     application.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^adm_"))
-    # Приём текста от админа (когда в режиме редактирования)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=8406627355), admin_receive_text))
     
-    # /add от админа в любом чате
+    # /add от админа
     application.add_handler(MessageHandler(filters.COMMAND & filters.REPLY, add_command_handler))
     
     # /custom для Premium
@@ -1263,7 +1295,7 @@ def main():
     # Активность в группе
     application.add_handler(MessageHandler(filters.Chat(ACTIVITY_GROUP_ID) & filters.TEXT & ~filters.COMMAND, activity_group_handler))
     
-    # Основные обработчики
+    # Основные
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("check", check_command))
     application.add_handler(CallbackQueryHandler(check_sub_callback, pattern="^check_sub$"))
