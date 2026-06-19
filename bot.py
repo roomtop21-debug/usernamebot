@@ -534,40 +534,40 @@ async def adminfrag_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for j in range(2):
             if i + j < len(text_keys):
                 key = text_keys[i + j]
-                row.append(InlineKeyboardButton(f"✏️ {key}", callback_data=f"edit_{key}"))
+                row.append(InlineKeyboardButton(key, callback_data=f"adm_edit_{key}"))
         keyboard.append(row)
     
-    keyboard.append([InlineKeyboardButton("📋 Показать все тексты", callback_data="show_all_texts")])
-    keyboard.append([InlineKeyboardButton("🔄 Сбросить на стандартные", callback_data="reset_texts")])
-    keyboard.append([InlineKeyboardButton("❌ Закрыть", callback_data="close_admin")])
+    keyboard.append([InlineKeyboardButton("📋 Показать все тексты", callback_data="adm_show_all")])
+    keyboard.append([InlineKeyboardButton("🔄 Сбросить на стандартные", callback_data="adm_reset")])
+    keyboard.append([InlineKeyboardButton("❌ Закрыть", callback_data="adm_close")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await message.reply_text(
-        "🛠 Админ-панель редактирования текстов\n\n"
-        "Выберите текст для редактирования:",
+        "🛠 Админ-панель редактирования текстов\n\nВыберите текст:",
         reply_markup=reply_markup
     )
 
-async def admin_text_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
     
     if user_id != 8406627355:
+        await query.answer("Нет доступа", show_alert=True)
         return
     
     data = query.data
     
-    if data == "close_admin":
+    if data == "adm_close":
         await query.message.delete()
         return
     
-    if data == "show_all_texts":
+    if data == "adm_show_all":
         texts = load_texts()
         all_texts = ""
         for key, value in texts.items():
-            preview = value[:80] + "..." if len(value) > 80 else value
+            preview = value[:60] + "..." if len(value) > 60 else value
             all_texts += f"📌 {key}:\n{preview}\n\n"
         
         if len(all_texts) > 4000:
@@ -576,13 +576,13 @@ async def admin_text_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.message.reply_text(f"📋 Все тексты:\n\n{all_texts}")
         return
     
-    if data == "reset_texts":
+    if data == "adm_reset":
         save_texts(DEFAULT_TEXTS.copy())
         await query.message.reply_text("✅ Тексты сброшены на стандартные!")
         return
     
-    if data.startswith("edit_"):
-        key = data.replace("edit_", "")
+    if data.startswith("adm_edit_"):
+        key = data.replace("adm_edit_", "")
         admin_edit_state[user_id] = key
         
         current_text = get_text(key)
@@ -591,7 +591,7 @@ async def admin_text_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"✏️ Редактирование: {key}\n\n"
             f"📝 Текущий текст:\n{current_text}\n\n"
             f"Отправьте новый текст (можно с Premium стикерами)\n"
-            f"Или /cancel для отмены"
+            f"/cancel для отмены"
         )
         return
 
@@ -610,7 +610,7 @@ async def admin_receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await message.reply_text(f"❌ Редактирование '{key}' отменено")
         return
     
-    key = admin_edit_state[user_id]
+    key = admin_edit_state.pop(user_id)
     
     texts = load_texts()
     if message.text_html:
@@ -619,14 +619,16 @@ async def admin_receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         texts[key] = message.text
     elif message.caption:
         texts[key] = message.caption
-    save_texts(texts)
+    else:
+        admin_edit_state[user_id] = key
+        await message.reply_text("❌ Отправьте текст!")
+        return
     
-    del admin_edit_state[user_id]
+    save_texts(texts)
     
     new_text = get_text(key)
     await message.reply_text(
-        f"✅ Текст '{key}' обновлен!\n\n"
-        f"Новый текст:\n{new_text[:500]}"
+        f"✅ Текст '{key}' обновлен!\n\nНовый текст:\n{new_text[:500]}"
     )
 
 # ===== ОСНОВНЫЕ ОБРАБОТЧИКИ =====
@@ -1119,25 +1121,28 @@ async def handle_buy_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text(get_text("buy_input_error"))
 
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def main_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик обычных кнопок (не админских)"""
     query = update.callback_query
     await query.answer()
     
-    if query.data == "main_menu":
+    data = query.data
+    
+    if data == "main_menu":
         await show_main_menu(query.message, update.effective_user.id)
-    elif query.data == "choose_length":
+    elif data == "choose_length":
         await choose_length(update, context)
-    elif query.data == "buy_generations":
+    elif data == "buy_generations":
         await buy_generations_menu(update, context)
-    elif query.data == "referral":
+    elif data == "referral":
         await referral_system(update, context)
-    elif query.data == "premium_menu":
+    elif data == "premium_menu":
         await premium_menu(update, context)
-    elif query.data == "buy_premium":
+    elif data == "buy_premium":
         await buy_premium(update, context)
-    elif query.data.startswith("len_"):
+    elif data.startswith("len_"):
         await choose_type(update, context)
-    elif query.data.startswith("type_"):
+    elif data.startswith("type_"):
         await generate_handler(update, context)
 
 async def precheckout_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1239,12 +1244,13 @@ def main():
     
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # Админ-панель
+    # Админ-панель: callback'и с префиксом adm_
     application.add_handler(CommandHandler("adminfrag123", adminfrag_command))
-    application.add_handler(CallbackQueryHandler(admin_text_callback, pattern="^(edit_|show_all_texts|reset_texts|close_admin)$"))
+    application.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^adm_"))
+    # Приём текста от админа (когда в режиме редактирования)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=8406627355), admin_receive_text))
     
-    # /add от админа
+    # /add от админа в любом чате
     application.add_handler(MessageHandler(filters.COMMAND & filters.REPLY, add_command_handler))
     
     # /custom для Premium
@@ -1257,11 +1263,11 @@ def main():
     # Активность в группе
     application.add_handler(MessageHandler(filters.Chat(ACTIVITY_GROUP_ID) & filters.TEXT & ~filters.COMMAND, activity_group_handler))
     
-    # Основные
+    # Основные обработчики
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("check", check_command))
     application.add_handler(CallbackQueryHandler(check_sub_callback, pattern="^check_sub$"))
-    application.add_handler(CallbackQueryHandler(button_callback))
+    application.add_handler(CallbackQueryHandler(main_callback_handler))
     application.add_handler(PreCheckoutQueryHandler(precheckout_callback))
     application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
