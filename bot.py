@@ -140,6 +140,7 @@ DEFAULT_TEXTS = {
     "check_error": "❌ Ошибка проверки",
     "add_need_reply": "❌ Нужно ответить на сообщение пользователя",
     "add_no_bot": "❌ Нельзя выдать боту",
+    "custom_pattern_length": "❌ Шаблон должен быть от 3 до 15 символов",
 }
 
 def load_json(filename):
@@ -420,35 +421,22 @@ async def find_available_username_massive(username_type: str, length: int, total
     return None
 
 async def find_custom_username(pattern: str, length: int = 5) -> str:
-    """Поиск username по шаблону"""
     pattern = pattern.lower().strip()
-    
-    # Если длина шаблона больше 5, подстраиваем длину
     actual_length = max(length, len(pattern))
     
-    # Генерируем варианты на основе шаблона
     usernames = set()
     chars = string.ascii_lowercase + string.digits
     max_attempts = 5000
     
     while len(usernames) < max_attempts:
         username = list(pattern)
-        
-        # Заменяем * на случайные символы
         for i in range(len(username)):
             if username[i] == '*':
                 username[i] = random.choice(chars)
-        
         username = ''.join(username)
-        
-        # Если длина меньше нужной, добавляем случайные символы
         while len(username) < actual_length:
             username += random.choice(chars)
-        
-        # Обрезаем если длиннее
         username = username[:actual_length]
-        
-        # Проверяем что есть минимум 2 буквы
         letter_count = sum(1 for c in username if c.isalpha())
         if letter_count >= 2:
             usernames.add(username)
@@ -535,6 +523,7 @@ async def adminfrag_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     
     if message.from_user.id != 8406627355:
+        await message.reply_text("❌ Нет доступа")
         return
     
     keyboard = []
@@ -578,7 +567,7 @@ async def admin_text_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         texts = load_texts()
         all_texts = ""
         for key, value in texts.items():
-            preview = value[:100] + "..." if len(value) > 100 else value
+            preview = value[:80] + "..." if len(value) > 80 else value
             all_texts += f"📌 {key}:\n{preview}\n\n"
         
         if len(all_texts) > 4000:
@@ -601,7 +590,7 @@ async def admin_text_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.message.reply_text(
             f"✏️ Редактирование: {key}\n\n"
             f"📝 Текущий текст:\n{current_text}\n\n"
-            f"Отправьте новый текст (можно с Premium стикерами):\n"
+            f"Отправьте новый текст (можно с Premium стикерами)\n"
             f"Или /cancel для отмены"
         )
         return
@@ -617,31 +606,27 @@ async def admin_receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     
     if message.text and message.text == '/cancel':
-        del admin_edit_state[user_id]
-        await message.reply_text("❌ Редактирование отменено")
+        key = admin_edit_state.pop(user_id, None)
+        await message.reply_text(f"❌ Редактирование '{key}' отменено")
         return
     
     key = admin_edit_state[user_id]
     
+    texts = load_texts()
     if message.text_html:
-        texts = load_texts()
         texts[key] = message.text_html
-        save_texts(texts)
     elif message.text:
-        texts = load_texts()
         texts[key] = message.text
-        save_texts(texts)
     elif message.caption:
-        texts = load_texts()
         texts[key] = message.caption
-        save_texts(texts)
+    save_texts(texts)
     
     del admin_edit_state[user_id]
     
     new_text = get_text(key)
     await message.reply_text(
         f"✅ Текст '{key}' обновлен!\n\n"
-        f"Новый текст:\n{new_text}"
+        f"Новый текст:\n{new_text[:500]}"
     )
 
 # ===== ОСНОВНЫЕ ОБРАБОТЧИКИ =====
@@ -849,7 +834,7 @@ async def custom_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pattern = context.args[0].lower()
     
     if len(pattern) < 3 or len(pattern) > 15:
-        await message.reply_text("❌ Шаблон должен быть от 3 до 15 символов")
+        await message.reply_text(get_text("custom_pattern_length"))
         return
     
     user_data = get_user_data(user_id)
@@ -934,8 +919,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_premium(user_id):
         keyboard.append([InlineKeyboardButton("💎 Premium", callback_data="premium_menu")])
     
-    keyboard.append([InlineKeyboardButton("🛠 Админ-панель", callback_data="admin_panel")])
-    
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     welcome_key = "welcome_premium" if is_premium(user_id) else "welcome"
@@ -978,8 +961,6 @@ async def show_main_menu(message, user_id):
     
     if not is_premium(user_id):
         keyboard.append([InlineKeyboardButton("💎 Premium", callback_data="premium_menu")])
-    
-    keyboard.append([InlineKeyboardButton("🛠 Админ-панель", callback_data="admin_panel")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -1060,7 +1041,6 @@ async def generate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(user_id) != "8406627355":
         update_user_balance(user_id, -1)
     
-    # Premium - ускоренный поиск
     total_to_check = 5000 if is_premium(user_id) else 2500
     search_text = get_text("searching_premium") if is_premium(user_id) else get_text("searching")
     
@@ -1155,11 +1135,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await premium_menu(update, context)
     elif query.data == "buy_premium":
         await buy_premium(update, context)
-    elif query.data == "admin_panel":
-        if update.effective_user.id == 8406627355:
-            await adminfrag_command(update, context)
-        else:
-            await query.answer("Нет доступа", show_alert=True)
     elif query.data.startswith("len_"):
         await choose_type(update, context)
     elif query.data.startswith("type_"):
