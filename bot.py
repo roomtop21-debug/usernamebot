@@ -15,7 +15,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8705607694:AAH11zwytS-MN0BfBxfb4a9wyPDrEuzKMbA")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHANNEL_ID = "@generateuse"
 CHANNEL_USERNAME = "generateuse"
 CHANNEL_CHAT_ID = -1003983302844
